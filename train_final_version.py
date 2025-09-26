@@ -78,9 +78,11 @@ class SegmentationDatasetAlb(Dataset):
         self.masks_dir = masks_dir
         self.transform = transform
 
+        #Get sorted list of images and masks
         self.images = sorted([f for f in os.listdir(images_dir) if f.lower().endswith((".jpg"))])
         self.masks  = sorted([f for f in os.listdir(masks_dir) if f.lower().endswith((".png"))])
 
+        #Match images and masks
         pairs = []
         mask_set = set(self.masks)
         for img in self.images:
@@ -104,14 +106,18 @@ class SegmentationDatasetAlb(Dataset):
         img_path = os.path.join(self.images_dir, img_name)
         mask_path = os.path.join(self.masks_dir, mask_name)
 
+        #Load image and mask as numpy arrays
         img = np.array(Image.open(img_path).convert("RGB"))
         mask = np.array(Image.open(mask_path).convert("L"))
         mask = (mask > 0).astype('uint8')
 
+        #Apply augmentation
         if self.transform:
             augmented = self.transform(image=img, mask=mask)
             img = augmented['image']
             mask = augmented['mask']
+
+            #Ensure mask is a float tensor with the correct shape
             if isinstance(mask, torch.Tensor):
                 if mask.ndim == 2:
                     mask = mask.unsqueeze(0).float()
@@ -148,7 +154,7 @@ model = smp.Unet(
 
 # Loss (BCE)
 bce = nn.BCEWithLogitsLoss()
-
+# Loss (Dice)
 def dice_loss_logits(pred_logits, target, eps=1e-6):
     pred = torch.sigmoid(pred_logits)
     pred_flat = pred.view(pred.shape[0], -1)
@@ -163,19 +169,19 @@ def combined_loss(pred_logits, target, alpha=0.3): # alpha = 0.3 -> more weight 
 
 
 # Evaluation metrics
-def pixel_iou_and_dice(pred_logits, target, thresh=0.5):
+def pixel_iou(pred_logits, target, thresh=0.5):
     pred = (torch.sigmoid(pred_logits) > thresh).cpu().numpy().astype(np.uint8)
     gt   = target.cpu().numpy().astype(np.uint8)
     batch = pred.shape[0]
-    ious, dices = [], []
+    ious = []
     for i in range(batch):
         p, g = pred[i,0], gt[i,0]
         inter = (p & g).sum()
         union = (p | g).sum()
         iou = inter / union if union > 0 else (1.0 if inter == 0 else 0.0)
-        dice = 2*inter / (p.sum() + g.sum()) if (p.sum()+g.sum())>0 else 1.0
-        ious.append(iou); dices.append(dice)
-    return float(np.mean(ious)), float(np.mean(dices))
+    
+        ious.append(iou)
+    return float(np.mean(ious))
 
 def precision_recall_f1(pred_logits, target, thresh=0.5):
     pred = (torch.sigmoid(pred_logits) > thresh).cpu().numpy().astype(np.uint8)
@@ -289,6 +295,7 @@ for epoch in range(start_epoch, NUM_EPOCHS + 1):
     running_loss, steps = 0.0, 0
     t0 = time()
 
+    # training step
     pbar = tqdm(train_loader, desc=f"Train Epoch {epoch}/{NUM_EPOCHS}", leave=False)
     for images, masks in pbar:
         images = images.to(device, non_blocking=True)
@@ -310,10 +317,10 @@ for epoch in range(start_epoch, NUM_EPOCHS + 1):
 
     train_loss = running_loss / steps if steps > 0 else 0.0
 
-    # Validation
+    # Validation step
     model.eval()
     val_loss, vsteps = 0.0, 0
-    ious, dices, precs, recs, f1s = [], [], [], [], []
+    ious, precs, recs, f1s = [], [], [], []
     with torch.no_grad():
         for images, masks in tqdm(val_loader, desc=f"Val Epoch {epoch}/{NUM_EPOCHS}", leave=False):
             images = images.to(device, non_blocking=True)
@@ -324,20 +331,22 @@ for epoch in range(start_epoch, NUM_EPOCHS + 1):
             val_loss += loss.item() * images.size(0)
             vsteps += images.size(0)
 
-            iou, dice = pixel_iou_and_dice(outputs, masks)
+            iou = pixel_iou(outputs, masks)
             prec, rec, f1 = precision_recall_f1(outputs, masks)
 
-            ious.append(iou); dices.append(dice)
+            ious.append(iou)
             precs.append(prec); recs.append(rec); f1s.append(f1)
 
     val_loss = val_loss / vsteps if vsteps > 0 else 0.0
-    mean_iou = np.mean(ious); mean_dice = np.mean(dices)
+    mean_iou = np.mean(ious)
     mean_prec, mean_rec, mean_f1 = np.mean(precs), np.mean(recs), np.mean(f1s)
     epoch_time = time() - t0
 
     print(f"Epoch {epoch} | {epoch_time:.1f}s | train_loss {train_loss:.4f} | val_loss {val_loss:.4f} | "
           f"IoU {mean_iou:.4f} | Precision {mean_prec:.4f} | Recall {mean_rec:.4f} | F1 {mean_f1:.4f}")
 
+
+    # save model
     ckpt_path = os.path.join(CHECKPOINT_DIR, f"unet_resnet34_epoch{epoch}_IoU{mean_iou:.4f}.pth")
     torch.save({
         'epoch': epoch,
@@ -345,10 +354,11 @@ for epoch in range(start_epoch, NUM_EPOCHS + 1):
         'optimizer_state_dict': optimizer.state_dict(),
         'scaler_state_dict': scaler.state_dict(),
         'val_loss': val_loss,
-        'val_dice': mean_dice
     }, ckpt_path)
     best_ckpt = ckpt_path
 
+    
+    #Early stopping
     if mean_iou > best_val_iou:
         best_val_iou = mean_iou
         epochs_no_improve = 0
