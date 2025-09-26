@@ -1,7 +1,3 @@
-# inference_to_submission_safe_load.py
-# Usage: edit TEST_DIR, CHECKPOINT_PATH, OUTPUT_CSV and run.
-# Requires: torch, segmentation_models_pytorch, opencv-python, numpy, pandas, tqdm, PIL
-
 import os
 import cv2
 import torch
@@ -13,32 +9,32 @@ from PIL import Image
 import segmentation_models_pytorch as smp
 import importlib, traceback
 
-# ---------- USER SETTINGS ----------
+
 TEST_DIR = "/content/drive/MyDrive/data/test/image"   # folder with .tif test images
-# You can set CHECKPOINT_PATH to a single file, or leave it None to auto-pick latest .pth in CHECKPOINT_DIR
-CHECKPOINT_PATH = None
+
+CHECKPOINT_PATH = None #picks the latest checkpoint
 CHECKPOINT_DIR = "/content/drive/MyDrive/models"
 OUTPUT_CSV = "/content/drive/MyDrive/submission.csv"
 MODEL_INPUT_SIZE = (512, 512)   # same size used during training (HxW)
 THRESHOLD = 0.5                 # probability threshold for binarization
-MIN_AREA = 100                  # minimum contour area in pixels (filter small detections)
+MIN_AREA = 100                  # minimum contour area in pixels
 SIMPLIFY_EPS_RATIO = 0.01       # poly approx epsilon = ratio * arcLength
-SAVE_MASK_IMAGES = True         # set True to also save predicted masks (useful for debug)
+SAVE_MASK_IMAGES = True         # set True to also save predicted masks 
 MASK_SAVE_DIR = "/content/drive/MyDrive/test_predictions_masks"
-# -----------------------------------
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
 
-# create save dir if requested
+# create save dir if needed
 if SAVE_MASK_IMAGES:
     os.makedirs(MASK_SAVE_DIR, exist_ok=True)
 
-# -------------------- Build model --------------------
+
 # build same model used in training
 model = smp.Unet(encoder_name="resnet34", encoder_weights=None, in_channels=3, classes=1)
 
-# -------------------- Robust checkpoint loader --------------------
+# checkpoint loader 
 def safe_load_checkpoint(path, map_location):
     """
     Attempts safe loading with weights_only=True first, then allowlists unsafe globals if needed,
@@ -85,7 +81,7 @@ def safe_load_checkpoint(path, map_location):
             traceback.print_exc()
             print("Falling back to trusted load (weights_only=False).")
 
-    # last resort: trusted load (careful: can run arbitrary code). Only do this for checkpoints you trust.
+    # last resort: trusted load.
     try:
         ckpt = torch.load(path, map_location=map_location, weights_only=False)
         print("Loaded checkpoint with weights_only=False (trusted load).")
@@ -95,7 +91,7 @@ def safe_load_checkpoint(path, map_location):
         traceback.print_exc()
         raise RuntimeError("Could not load checkpoint: " + str(e_final))
 
-# -------------------- Choose checkpoint file --------------------
+# Choose checkpoint file 
 if CHECKPOINT_PATH and os.path.isfile(CHECKPOINT_PATH):
     ckpt_file = CHECKPOINT_PATH
 else:
@@ -139,7 +135,7 @@ model.to(device)
 model.eval()
 print("Model ready for inference.")
 
-# -------------------- Helpers --------------------
+#  Helpers 
 def preprocess_image_for_model(orig_img_rgb, input_size):
     """
     orig_img_rgb: numpy HxWx3 uint8 (RGB)
@@ -163,7 +159,7 @@ def postprocess_mask_to_polygons(mask_uint8, min_area=MIN_AREA, simplify_eps_rat
     returns: list_of_polygons, each polygon is a list of (x,y) ints
     """
     polys = []
-    # find contours (OpenCV expects single-channel uint8)
+    # find contours 
     contours, hierarchy = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -187,7 +183,7 @@ def imageid_from_filename(fname):
     except Exception:
         return stem
 
-# -------------------- Inference loop --------------------
+# Inference loop 
 test_dir = Path(TEST_DIR)
 files = sorted([p for p in test_dir.iterdir() if p.suffix.lower() in (".tif")])
 
