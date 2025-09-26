@@ -4,7 +4,7 @@ import shutil
 from PIL import Image, ImageDraw, ImageOps
 
 def clamp_point(x, y, w, h):
-    """Clamp polygon coords inside image bounds [0, w-1], [0, h-1] and convert to int."""
+    """Clamp polygon coordinates to image bounds [0, w-1], [0, h-1] and convert to int."""
     xi = int(round(x))
     yi = int(round(y))
     xi = max(0, min(w-1, xi))
@@ -13,13 +13,20 @@ def clamp_point(x, y, w, h):
 
 def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir,
                                preview_dir=None, max_previews=5):
+    """
+    Convert COCO-format annotations to binary masks.
+    Optionally creates preview images overlaying masks on the originals.
+    """
     print(f"\nProcessing JSON: {json_path}")
     print(f"Source images: {src_img_dir}")
+
+    # Ensure output directories exist
     os.makedirs(dst_img_dir, exist_ok=True)
     os.makedirs(dst_mask_dir, exist_ok=True)
     if preview_dir:
         os.makedirs(preview_dir, exist_ok=True)
 
+    # Load COCO JSON
     with open(json_path, "r", encoding="utf-8") as f:
         coco = json.load(f)
 
@@ -32,16 +39,15 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
     anns = coco.get("annotations", [])
     print(f"Found {len(anns)} annotations in JSON.")
 
-    # Build dict image_id -> image info
+    # Map image_id -> image info for easy lookup
     images = {img["id"]: img for img in images_list}
 
-    # Prepare empty masks and copy images
+    # Prepare empty masks and copy source images
     masks = {}
     missing_images = []
     for img in images_list:
         w, h = img["width"], img["height"]
-        mask = Image.new("L", (w, h), 0)
-        masks[img["id"]] = mask
+        masks[img["id"]] = Image.new("L", (w, h), 0)  # initialize blank mask
 
         src_path = os.path.join(src_img_dir, os.path.basename(img["file_name"]))
         dst_path = os.path.join(dst_img_dir, os.path.basename(img["file_name"]))
@@ -56,7 +62,7 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
             print("   ", m)
         print(f"   ... total missing: {len(missing_images)}")
 
-    # Draw polygons to masks
+    # Draw polygon annotations onto masks
     rle_found = 0
     skipped_ann = 0
     for ann in anns:
@@ -67,7 +73,7 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
 
         segmentation = ann.get("segmentation", [])
         if isinstance(segmentation, dict):
-            # RLE format — warn and skip (could use pycocotools to decode)
+            # RLE format detected — skip
             rle_found += 1
             continue
 
@@ -75,18 +81,13 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
         draw = ImageDraw.Draw(mask_img)
         w, h = mask_img.size
 
-        # segmentation is a list of polygons (each polygon is a flat list)
         for seg in segmentation:
             if not isinstance(seg, (list, tuple)) or len(seg) < 6:
-                # not a polygon (need at least 3 points)
+                # Not enough points for a polygon
                 continue
-            # Convert to list of (x,y) with clamping
-            poly_pts = []
-            for i in range(0, len(seg), 2):
-                x = seg[i]; y = seg[i+1]
-                xi, yi = clamp_point(x, y, w, h)
-                poly_pts.append((xi, yi))
-            # Draw polygon (fill=1)
+            # Convert flat list to (x, y) tuples with clamping
+            poly_pts = [clamp_point(seg[i], seg[i+1], w, h) for i in range(0, len(seg), 2)]
+            # Draw filled polygon
             try:
                 draw.polygon(poly_pts, outline=1, fill=1)
             except Exception as e:
@@ -94,9 +95,9 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
                 skipped_ann += 1
 
     if rle_found:
-        print(f"⚠️ Found {rle_found} annotations encoded as RLE; this script skips them (use pycocotools to decode).")
+        print(f"Found {rle_found} RLE-encoded annotations;")
 
-    # Save masks and produce previews for the first N images
+    # Save masks and optionally create preview overlays
     saved_masks = 0
     preview_count = 0
     for img in images_list:
@@ -106,17 +107,15 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
         masks[img["id"]].save(mask_path)
         saved_masks += 1
 
-        # preview overlay
         if preview_dir and preview_count < max_previews:
             src_img_path = os.path.join(dst_img_dir, base_fn)
             if os.path.exists(src_img_path):
                 try:
                     im = Image.open(src_img_path).convert("RGBA")
                     mask = masks[img["id"]]
-                    # create a red overlay where mask==1
+                    # Create red overlay where mask==1
                     red = Image.new("RGBA", im.size, (255,0,0,120))
-                    mask_rgb = ImageOps.colorize(mask.convert("L"), black="black", white="white").convert("L")
-                    # composite red over image using mask
+                    # Composite red on original image using mask
                     composed = Image.composite(red, im, mask.convert("L"))
                     # Blend original and overlay for context
                     blended = Image.blend(im, composed, alpha=0.5)
@@ -133,11 +132,11 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
     print("Done.\n")
 
 if __name__ == "__main__":
-    # --- EDIT THESE paths to match your system ---
-    base_src = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\data"
-    out_base = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\data_prepared"
+    # --- USER CONFIG: set paths for your system ---
+    base_src = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\raw"
+    out_base = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\data"
 
-    # Train
+    # Process training set
     coco_to_masks_with_logging(
         json_path=os.path.join(base_src, "train", "train.json"),
         src_img_dir=os.path.join(base_src, "train", "image"),
@@ -147,7 +146,7 @@ if __name__ == "__main__":
         max_previews=5
     )
 
-    # Val
+    # Process validation set
     coco_to_masks_with_logging(
         json_path=os.path.join(base_src, "val", "val.json"),
         src_img_dir=os.path.join(base_src, "val", "image"),
@@ -157,7 +156,7 @@ if __name__ == "__main__":
         max_previews=5
     )
 
-    # Test images copy (no masks)
+    # Copy test images only (no masks)
     src_test = os.path.join(base_src, "test")
     dst_test = os.path.join(out_base, "test", "images")
     os.makedirs(dst_test, exist_ok=True)
@@ -167,3 +166,4 @@ if __name__ == "__main__":
             shutil.copy2(os.path.join(src_test, f), os.path.join(dst_test, f))
             test_files += 1
     print(f"Copied {test_files} test images to {dst_test}")
+
