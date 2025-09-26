@@ -42,4 +42,5 @@ The testing script (test.py) loads the previous model weights and runs inference
 
 The second training model obtained much better results then the first one, mainly because of the higher complexity of the CNN, but the added focus to F1-score during training may have helped. In order to increase computational efficiency, the script could be modified in order to not compute as many metrics or not to perform any visual check. Longer training cycles with a higher number of epochs could achieve better results, specially if the learning rate is updated when the metrics plateau.
 
+When subitting to kaggle, the score obtained was around 0.26, wich is odd, the main suspicion is that it has something to do with the way that the masks are transformed into polygons coordinates, however, I wasn't able to spot the error. restructuring of this part of the test.py file may be able to up the score.
  
