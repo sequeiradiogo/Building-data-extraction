@@ -18,11 +18,11 @@
 
  The optimizer employed was Adam wich adds weight directly into the gradient update.
 
- The script was made in order to reduce the learning rate after the loss hit a plateau. This would be great for longer training with a lot of epochs, however, for computationl reasons, training was only carried out until o epochs.
+ The script was made in order to reduce the learning rate after the loss hit a plateau. This would be great for longer training with a lot of epochs, however, for computationl reasons, training was only carried out until 10 epochs.
 
  The second and final attempt employed a more complex U-Net model, employing ResNet-34 as the encoder, and 4 decoder blocks, this is a more efficient model that was expected to deliver better results. In order order to balance out the extra memory usage, torch.amp.autocast and GradScaler were used, this two tools allow for some data to be converted to float 16 instead of float 32, preserving memory usage. In the end each epoch ended up lasting for about 5 minutes, wich was acceptable.
-
- The loss was now computed with a bigger emphasys towards F1-Score, altough recall precision and IoU were also monitored.
+,
+ The loss was now computed with a bigger emphasys towards F1-Score, altough recall, precision and IoU were also monitored.
 
  The optimizer is now AdamW wich allows for better generalization, because weight decay is decoupled from the gradient update.
 
