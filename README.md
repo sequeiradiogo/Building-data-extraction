@@ -9,6 +9,7 @@ This repository implements a semantic segmentation pipeline to detect buildings 
 - `trainv1.py`: Initial training attempt with a simple U-Net.
 - `train_final_version.py`: Final training script using ResNet-34 U-Net.
 - `test.py`: Runs inference and generates submission results.
+- `submission.csv`: File submitted onto kaggle
 
 ## Model Choice
 
