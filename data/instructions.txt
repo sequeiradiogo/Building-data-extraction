@@ -1,1 +1,6 @@
-The data for the training, validation and testing can be found at https://www.kaggle.com/competitions/building-extraction-generalization-2024/data
+Dataset
+
+The training, validation, and testing data for this project are available on Kaggle:
+Building Extraction Generalization 2024 Competition
+
+Please follow the instructions on Kaggle to download the data.
