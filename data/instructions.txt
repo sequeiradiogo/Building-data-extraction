@@ -1,0 +1,1 @@
+The data for the training, validation and testing can be found at https://www.kaggle.com/competitions/building-extraction-generalization-2024/data
