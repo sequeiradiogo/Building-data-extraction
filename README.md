@@ -56,7 +56,7 @@ pip install -r requirements.txt
 python src/prepare_dataset.py
 ```
 
-This generates tensors in `data/processed/` for training and validation.
+This generates masks in `data/processed/` for training and validation.
 
 ---
 ### Example mask conversion
