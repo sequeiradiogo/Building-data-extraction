@@ -1,3 +1,4 @@
+#prepare_dataset.py
 import os
 import json
 import shutil
@@ -133,8 +134,8 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
 
 if __name__ == "__main__":
     # --- USER CONFIG: set paths for your system ---
-    base_src = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\raw"
-    out_base = r"C:\Users\35193\OneDrive\Ambiente de Trabalho\data"
+    base_src = r"/content/drive/MyDrive/raw"
+    out_base = r"/content/drive/MyDrive/data"
 
     # Process training set
     coco_to_masks_with_logging(
