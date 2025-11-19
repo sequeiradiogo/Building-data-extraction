@@ -61,6 +61,10 @@ This generates masks in `data/processed/` for training and validation.
 ---
 ### Example mask conversion
 
+| Original | Mask |
+|---------|-----------|
+| ![](output/examples/raw.jpg) | ![](output/examples/mask.jpg) |
+
 ## Model
 
 * **Architecture**: U-Net with ResNet-34 encoder and 4 decoder blocks.
