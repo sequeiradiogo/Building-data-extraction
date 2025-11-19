@@ -65,6 +65,19 @@ This generates masks in `data/processed/` for training and validation.
 |---------|-----------|
 | <img src="output/examples/raw.jpg" width="300"> | <img src="output/examples/mask.jpg" width="300"> |
 
+3. Transform he data into tensors, ready for the model with:
+
+```bash
+python src/prepare_dataset.py
+```
+Example output:
+
+Found 3784 valid image/mask pairs
+Number of samples: 3784
+Image shape: torch.Size([3, 512, 512]), Mask shape: torch.Size([1, 512, 512])
+Batch image shape: torch.Size([4, 3, 512, 512]), Batch mask shape: torch.Size([4, 1, 512, 512])
+
+
 ## Model
 
 * **Architecture**: U-Net with ResNet-34 encoder and 4 decoder blocks.
@@ -91,6 +104,12 @@ python src/test.py
 * Predicted masks are saved in `test_prediction_masks/`.
 * A Kaggle submission CSV is generated as `outputs/submission.csv`.
 * Small speckles in masks are automatically removed during post-processing.
+
+### Example Prediction
+
+| Original | Predicted |
+|---------|-----------|
+| <img src="output/examples/raw_test.jpg" width="300"> | <img src="output/examples/predicted.jpg" width="300"> |
 
 ---
 
