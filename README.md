@@ -5,6 +5,7 @@ This repository implements a semantic segmentation pipeline to detect buildings 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sequeiradiogo/Building-data-extraction/blob/main/notebooks/inference_demo.ipynb)
 
 
+
 ## Repository Structure
 
 ```
