@@ -58,7 +58,7 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
             missing_images.append(src_path)
 
     if missing_images:
-        print("⚠️ Missing image files (will still create blank masks for them):")
+        print("Missing image files (will still create blank masks for them):")
         for m in missing_images[:10]:
             print("   ", m)
         print(f"   ... total missing: {len(missing_images)}")
