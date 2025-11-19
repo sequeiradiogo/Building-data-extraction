@@ -1,4 +1,4 @@
-# Building Extraction from Satellite Images
+# Building Extraction from Satellite Images - U-Net (ResNet34) - val IoU ≈ 0.78
 
 This repository implements a semantic segmentation pipeline to detect buildings from satellite imagery. The goal is to balance computational efficiency and model performance using a U-Net-based architecture.
 
@@ -38,7 +38,7 @@ This project is designed to be run on **Google Colab**, which provides free GPU 
 ```bash
 !git clone https://github.com/your-username/building-extraction.git
 %cd building-extraction
-
+```
 3. Install dependencies:
 
 ```bash
@@ -59,6 +59,7 @@ python src/prepare_dataset.py
 This generates tensors in `data/processed/` for training and validation.
 
 ---
+### Example mask conversion
 
 ## Model
 
