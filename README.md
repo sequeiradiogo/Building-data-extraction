@@ -126,7 +126,3 @@ python src/test.py
 See `requirements.txt` for all necessary Python packages.
 
 ---
-
-## License
-
-Specify your license here (e.g., MIT License).
