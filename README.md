@@ -63,7 +63,7 @@ This generates masks in `data/processed/` for training and validation.
 
 | Original | Mask |
 |---------|-----------|
-| ![](output/examples/raw.jpg) | ![](output/examples/mask.jpg) |
+| <img src="output/examples/raw.jpg" width="300"> | <img src="output/examples/mask.jpg" width="300"> |
 
 ## Model
 
