@@ -2,7 +2,7 @@
 
 This repository implements a semantic segmentation pipeline to detect buildings from satellite imagery. The goal is to balance computational efficiency and model performance using a U-Net-based architecture.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sequeiradiogo/Building-data-extraction/main/notebooks/inference_demo.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sequeiradiogo/Building-data-extraction/blob/main/notebooks/inference_demo.ipynb)
 
 
 
