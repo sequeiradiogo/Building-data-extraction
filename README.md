@@ -13,9 +13,13 @@ building-extraction/
 │
 ├── README.md                   # Project overview and instructions
 ├── requirements.txt            # Python dependencies
+├── LICENSE
 │
 ├── data/
-│   ├── instructions.txt        # How to obtain the dataset
+│   └── instructions.txt        # How to obtain the dataset
+|
+├── notebooks/
+│   └── inference_demo.ipynb        # How to obtain the dataset
 │
 ├── src/                        # Source code
 │   ├── prepare_dataset.py      # Preprocess raw images/masks
@@ -27,8 +31,16 @@ building-extraction/
 ├── checkpoints/                # Saved model weights
 │   └── unet_final.pth
 │
-└── outputs/                    
-    └── submission.csv          # Kaggle submission file
+└── output/                    
+    ├── submission.csv          # Kaggle submission file
+    └── examples/
+        ├── mask.jpg            # Mask used for training
+        ├── raw.jpg             # Raw Image
+        ├── predicted.jpg       # Predcited mask of raw_test.jpg
+        ├── raw_test.jpg        # Test image
+        └── test_images.zip     # Zip folder with sample test images for demo
+        
+
 ```
 
 ---
