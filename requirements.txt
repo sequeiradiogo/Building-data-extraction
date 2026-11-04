@@ -8,5 +8,6 @@ numpy>=1.26
 pandas>=2.1
 matplotlib>=3.8
 opencv-python>=4.8
+scikit-image>=0.21
 tqdm>=4.66
 Pillow>=10.0

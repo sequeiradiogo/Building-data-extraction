@@ -5,7 +5,9 @@ Run the trained model on a folder of images and write the Kaggle submission CSV
     python src/predict.py --test-dir data/test/images --checkpoint models/unet_resnet34_buildings.pth
 
 Without --checkpoint, the checkpoint with the best validation IoU in --checkpoint-dir is used.
-The functions below (predict_mask, mask_to_polygons, ...) are also used by the demo notebook.
+Touching buildings are separated with a seeded watershed (see split_instances); use
+--no-split for the original behaviour, where they are merged into one polygon.
+The functions below (predict_polygons, probs_to_polygons, ...) are also used by the demo notebook.
 """
 import argparse
 import os
@@ -20,6 +22,14 @@ from tqdm import tqdm
 from common import FINAL_PREFIX, IMAGENET_MEAN, IMAGENET_STD, ensure_drive_mounted, find_checkpoint, get_device, load_model
 
 IMAGE_EXTS = (".tif", ".tiff", ".jpg", ".jpeg", ".png")
+
+# Post-processing defaults, tuned for per-building F1 on the competition validation set
+# (see README): 0.41 without splitting touching buildings, 0.65 with it.
+DEFAULT_THRESHOLD = 0.5
+DEFAULT_MIN_AREA = 100
+DEFAULT_SIMPLIFY_EPS = 0.01
+DEFAULT_SEED_THRESHOLD = 0.9
+DEFAULT_SEED_EROSION = 4
 
 
 def read_rgb(path):
@@ -45,10 +55,9 @@ def predict_probabilities(model, img_rgb, device=None, input_size=(512, 512)):
     return torch.sigmoid(logits.float())[0, 0].cpu().numpy()
 
 
-def predict_mask(model, img_rgb, device=None, input_size=(512, 512), threshold=0.5, clean=True):
-    """Binary building mask (uint8, 0/255) at the original image resolution."""
-    probs = predict_probabilities(model, img_rgb, device, input_size)
-    h, w = img_rgb.shape[:2]
+def probs_to_mask(probs, out_shape, threshold=0.5, clean=True):
+    """Model-resolution probabilities -> binary mask (uint8, 0/255) at out_shape (h, w)."""
+    h, w = out_shape
     mask = (probs > threshold).astype(np.uint8) * 255
     mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
     if clean:
@@ -59,9 +68,72 @@ def predict_mask(model, img_rgb, device=None, input_size=(512, 512), threshold=0
     return mask
 
 
+def predict_mask(model, img_rgb, device=None, input_size=(512, 512), threshold=0.5, clean=True):
+    """Binary building mask (uint8, 0/255) at the original image resolution."""
+    probs = predict_probabilities(model, img_rgb, device, input_size)
+    return probs_to_mask(probs, img_rgb.shape[:2], threshold, clean)
+
+
+def split_instances(probs, mask, seed_threshold=DEFAULT_SEED_THRESHOLD, seed_erosion=DEFAULT_SEED_EROSION):
+    """
+    Split a binary building mask into one label per building (seeded watershed).
+
+    Seeds are the cores where the model is very confident (probability > seed_threshold),
+    eroded so that touching buildings get separate seeds. The watershed on the probability
+    map then assigns every other mask pixel to a seed, cutting along the low-probability
+    gaps between neighbouring buildings. Mask regions without a seed keep a single label.
+
+    probs: probabilities at any resolution (float 0..1); mask: binary mask (h, w).
+    Returns an int32 label image of shape (h, w), 0 = background.
+    """
+    from skimage.segmentation import watershed
+
+    h, w = mask.shape
+    p = cv2.resize(probs.astype(np.float32), (w, h), interpolation=cv2.INTER_LINEAR)
+    fg = mask > 0
+    seeds = ((p > seed_threshold) & fg).astype(np.uint8)
+    if seed_erosion > 0:
+        seeds = cv2.erode(seeds, np.ones((3, 3), np.uint8), iterations=seed_erosion)
+    _, markers = cv2.connectedComponents(seeds)
+    labels = watershed(-p, markers, mask=fg).astype(np.int32)
+
+    unseeded = (fg & (labels == 0)).astype(np.uint8)
+    if unseeded.any():
+        _, extra = cv2.connectedComponents(unseeded)
+        labels = np.where(extra > 0, extra + labels.max(), labels).astype(np.int32)
+    return labels
+
+
+def _simplified_polygon(contour, simplify_eps_ratio, offset=(0, 0)):
+    eps = max(1.0, simplify_eps_ratio * cv2.arcLength(contour, True))
+    approx = cv2.approxPolyDP(contour, epsilon=eps, closed=True)
+    return [(int(pt[0][0]) + offset[0], int(pt[0][1]) + offset[1]) for pt in approx]
+
+
+def labels_to_polygons(labels, min_area=100, simplify_eps_ratio=0.01):
+    """One simplified polygon per labelled region (its largest outer contour)."""
+    from scipy.ndimage import find_objects
+
+    polys = []
+    for label, sl in enumerate(find_objects(labels), start=1):
+        if sl is None:
+            continue
+        region = (labels[sl] == label).astype(np.uint8)
+        contours, _ = cv2.findContours(region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+        cnt = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(cnt) < min_area:
+            continue
+        coords = _simplified_polygon(cnt, simplify_eps_ratio, offset=(sl[1].start, sl[0].start))
+        if len(coords) >= 3:
+            polys.append(coords)
+    return polys
+
+
 def mask_to_polygons(mask, min_area=100, simplify_eps_ratio=0.01):
     """
-    Outer contours of a binary mask as simplified polygons.
+    Outer contours of a binary mask as simplified polygons (touching buildings stay merged).
     Returns a list of polygons, each a list of (x, y) int tuples.
     """
     polys = []
@@ -69,12 +141,49 @@ def mask_to_polygons(mask, min_area=100, simplify_eps_ratio=0.01):
     for cnt in contours:
         if cv2.contourArea(cnt) < min_area:
             continue
-        eps = max(1.0, simplify_eps_ratio * cv2.arcLength(cnt, True))
-        approx = cv2.approxPolyDP(cnt, epsilon=eps, closed=True)
-        coords = [(int(pt[0][0]), int(pt[0][1])) for pt in approx]
+        coords = _simplified_polygon(cnt, simplify_eps_ratio)
         if len(coords) >= 3:
             polys.append(coords)
     return polys
+
+
+def probs_to_polygons(probs, out_shape, threshold=DEFAULT_THRESHOLD, min_area=DEFAULT_MIN_AREA,
+                      simplify_eps_ratio=DEFAULT_SIMPLIFY_EPS, seed_threshold=DEFAULT_SEED_THRESHOLD,
+                      seed_erosion=DEFAULT_SEED_EROSION):
+    """
+    Full post-processing: probabilities -> building polygons at out_shape (h, w).
+    Touching buildings are split with split_instances(); seed_threshold=None keeps them
+    merged (original behaviour).
+    """
+    mask = probs_to_mask(probs, out_shape, threshold)
+    if seed_threshold is None:
+        return mask_to_polygons(mask, min_area, simplify_eps_ratio)
+    labels = split_instances(probs, mask, seed_threshold, seed_erosion)
+    return labels_to_polygons(labels, min_area, simplify_eps_ratio)
+
+
+def predict_polygons(model, img_rgb, device=None, input_size=(512, 512), **postprocessing):
+    """Image -> building polygons (list of [(x, y), ...]) at the original resolution."""
+    probs = predict_probabilities(model, img_rgb, device, input_size)
+    return probs_to_polygons(probs, img_rgb.shape[:2], **postprocessing)
+
+
+def add_postprocessing_args(p):
+    """CLI options shared by predict.py and evaluate.py."""
+    p.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD, help="probability threshold")
+    p.add_argument("--min-area", type=float, default=DEFAULT_MIN_AREA, help="drop polygons smaller than this (pixels)")
+    p.add_argument("--simplify-eps", type=float, default=DEFAULT_SIMPLIFY_EPS,
+                   help="polygon simplification, fraction of the perimeter")
+    p.add_argument("--seed-threshold", type=float, default=DEFAULT_SEED_THRESHOLD,
+                   help="probability defining building cores for the watershed split")
+    p.add_argument("--seed-erosion", type=int, default=DEFAULT_SEED_EROSION,
+                   help="erosion (pixels) applied to the cores so touching buildings get separate seeds")
+    p.add_argument("--no-split", action="store_true", help="do not split touching buildings (original behaviour)")
+
+
+def postprocessing_kwargs(args):
+    return dict(threshold=args.threshold, min_area=args.min_area, simplify_eps_ratio=args.simplify_eps,
+                seed_threshold=None if args.no_split else args.seed_threshold, seed_erosion=args.seed_erosion)
 
 
 def polygons_to_string(polys):
@@ -99,9 +208,7 @@ def parse_args(argv=None):
     p.add_argument("--output-csv", default="output/submission.csv")
     p.add_argument("--mask-dir", default=None, help="if set, also save the predicted masks as PNG here")
     p.add_argument("--img-size", type=int, default=512, help="model input size (as in training)")
-    p.add_argument("--threshold", type=float, default=0.5)
-    p.add_argument("--min-area", type=float, default=100, help="drop polygons smaller than this (pixels)")
-    p.add_argument("--simplify-eps", type=float, default=0.01, help="polygon simplification, fraction of perimeter")
+    add_postprocessing_args(p)
     return p.parse_args(argv)
 
 
@@ -133,10 +240,11 @@ def main(argv=None):
         if img is None:
             print("Warning: couldn't read", path)
             continue
-        mask = predict_mask(model, img, device, size, args.threshold)
+        probs = predict_probabilities(model, img, device, size)
         if args.mask_dir:
+            mask = probs_to_mask(probs, img.shape[:2], args.threshold)
             cv2.imwrite(os.path.join(args.mask_dir, path.stem + "_pred_mask.png"), mask)
-        polys = mask_to_polygons(mask, args.min_area, args.simplify_eps)
+        polys = probs_to_polygons(probs, img.shape[:2], **postprocessing_kwargs(args))
         rows.append({"ImageID": imageid_from_filename(path.name), "Coordinates": polygons_to_string(polys)})
 
     os.makedirs(os.path.dirname(os.path.abspath(args.output_csv)), exist_ok=True)

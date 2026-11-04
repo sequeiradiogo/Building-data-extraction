@@ -7,14 +7,15 @@
 Detecting building footprints in aerial images and exporting them as polygons, built for the
 [IEEE BigData Cup 2024 – Building Extraction Generalization Challenge](https://www.kaggle.com/competitions/building-extraction-generalization-2024) on Kaggle.
 
-The pipeline treats the task as **semantic segmentation**: a U-Net with an ImageNet-pretrained
-ResNet-34 encoder predicts a building mask, which is cleaned up and converted into one simplified
-polygon per connected region.
+A U-Net with an ImageNet-pretrained ResNet-34 encoder predicts a building probability map; a
+**seeded watershed** then separates touching buildings, and each building is exported as a simplified
+polygon. Adding the watershed step raised the leaderboard score from **0.262 to 0.401** (private F1)
+without retraining the model.
 
 ![Predictions on competition test images](assets/predictions.jpg)
 <sub>Predictions on the 9 sample images from the competition test set in `output/examples/test_images.zip`
-(no ground truth is available for them). Orange: predicted mask, yellow: exported polygons. Note the
-false positive along the right edge of `0046.tif`.</sub>
+(no ground truth is available for them). Orange: predicted mask, yellow: one exported polygon per
+building. Note the false positive along the right edge of `0046.tif`.</sub>
 
 ---
 
@@ -27,7 +28,7 @@ COCO polygons ──► prepare_dataset.py ──► binary masks (PNG)
                       train.py: U-Net / ResNet-34, BCE + Dice loss, AdamW + OneCycleLR, AMP
                                               │
                                               ▼
-test images ──► predict.py: mask ► morphological clean-up ► contours ► simplified polygons ──► submission.csv
+test images ──► predict.py: probabilities ► mask + clean-up ► watershed split ► polygons ──► submission.csv
 ```
 
 | Component | Choice |
@@ -37,25 +38,42 @@ test images ──► predict.py: mask ► morphological clean-up ► contours �
 | Augmentation | flips, 90° rotations, small rotations, brightness/contrast, blur/noise ([Albumentations](https://albumentations.ai)) |
 | Loss | 0.3 · BCE + 0.7 · Dice (Dice weighted higher to favour overlap with the building mask) |
 | Optimization | AdamW, OneCycleLR (peak 1e-3), mixed precision, early stopping on validation IoU |
-| Post-processing | threshold 0.5, morphological close + open, contours with area ≥ 100 px, Douglas–Peucker simplification (ε = 1 % of the perimeter) |
+| Post-processing | threshold 0.5, morphological close + open, seeded watershed (seeds: probability > 0.9, eroded 4 px), polygons with area ≥ 100 px, Douglas–Peucker simplification (ε = 1 % of the perimeter) |
 
 A simpler **baseline** (`train_baseline.py`) is included for comparison: a 3-level U-Net trained from
-scratch with an equally weighted BCE + Dice loss. The final model performed clearly better.
+scratch with an equally weighted BCE + Dice loss. Its original results were lower than the final
+model's, but they were affected by a bug (the geometric augmentations were applied to the images but not to
+the masks) that has since been fixed, so they are not reported here.
 
 ## Results
 
-| | Validation IoU | Validation Dice / F1 | Kaggle score |
-|---|---|---|---|
-| U-Net / ResNet-34 | **0.783** | **0.873** | ~0.26 |
+| Post-processing | Pixel IoU (val) | Building F1 (val) | Kaggle public | Kaggle private |
+|---|---|---|---|---|
+| Connected regions (original) | 0.783 | 0.41 | 0.259 | 0.262 |
+| **+ watershed split** | 0.783 | **0.65** | **0.383** | **0.401** |
 
-Validation metrics are pixel-level, averaged per image.
+*Pixel IoU*: mean per image, the metric used during training (pixel Dice 0.873).
+*Building F1*: a predicted polygon counts as correct when it overlaps an annotated building with
+IoU > 0.5, computed with [`src/evaluate.py`](src/evaluate.py) on the 933 validation images. The winning
+solution of the challenge reached 0.703 (private) with an instance-segmentation model (YOLOv8-seg).
 
-**Why the leaderboard score is much lower than the validation IoU.** The competition scores the
-submitted *polygons* (an F1 score over buildings), while this model is trained and validated on
-*pixels*. Semantic segmentation cannot tell touching buildings apart, so a row of houses becomes a
-single polygon (visible in the Chicago example above). Small buildings removed by the area filter and
-the polygon simplification also cost matches. Pixel IoU does not penalize any of this, but a
-per-building metric does. See [Next steps](#limitations-and-next-steps).
+### From pixels to buildings
+
+The model scored well on pixels (IoU 0.78), but the first submission only reached 0.26. The
+leaderboard scores **buildings**, and semantic segmentation cannot tell touching buildings apart: a row
+of houses came out as a single polygon. On the validation set the original pipeline produced only
+17 k polygons for 38 k annotated buildings (recall 0.30).
+
+The fix is a post-processing step, without retraining. The model is very confident in the centre of each
+building and less so on the gaps between neighbours. The high-confidence cores (probability > 0.9, eroded by
+4 px) become seeds, and a watershed on the probability map grows each seed until it meets its neighbour,
+cutting the merged regions along those gaps. The parameters were chosen on the validation set with
+`evaluate.py`; the threshold, minimum area and simplification were already close to optimal.
+
+![Connected regions vs watershed split](assets/instance_split.jpg)
+
+The gap between validation (0.65) and the leaderboard (0.40) most likely comes from the test images,
+which cover different regions than the training data. That domain shift is what the challenge is about.
 
 ### Generalization to other imagery
 
@@ -63,7 +81,7 @@ To check how the model behaves outside the competition data, it was evaluated, w
 fine-tuning, on the 967 test images of the
 [Roboflow *Buildings Instance Segmentation* dataset](https://huggingface.co/datasets/keremberke/satellite-building-segmentation) (CC BY 4.0):
 
-| Imagery | Images | IoU | F1 |
+| Imagery | Images | Pixel IoU | Pixel F1 |
 |---|---|---|---|
 | Aerial (Tyrol, Austin, Chicago) | 400 | 0.68 | 0.77 |
 | Other sources, mostly satellite (Kherson, Tripoli, Donetsk, Mekele, Mykolaiv, Kharkiv, …) | 567 | 0.23 | 0.31 |
@@ -84,7 +102,8 @@ same domain-shift problem that the "generalization" theme of the challenge is ab
 │   ├── dataset.py           # PyTorch datasets + joint image/mask augmentation
 │   ├── train.py             # final model (U-Net / ResNet-34)
 │   ├── train_baseline.py    # baseline U-Net from scratch
-│   ├── predict.py           # inference, mask -> polygons, submission CSV
+│   ├── predict.py           # inference, watershed split, polygons, submission CSV
+│   ├── evaluate.py          # per-building F1 on a COCO-annotated split
 │   ├── engine.py            # losses, metrics, train / validation loops
 │   └── common.py            # checkpoints, model construction, figures
 ├── notebooks/
@@ -93,7 +112,7 @@ same domain-shift problem that the "generalization" theme of the challenge is ab
 ├── assets/                  # README figures and sample images from another dataset
 ├── models/                  # model weights (downloaded, not tracked)
 ├── output/
-│   ├── submission.csv       # submitted predictions
+│   ├── submission.csv       # submitted predictions (private F1 0.401)
 │   └── examples/            # example image/mask and 9 competition test images
 └── requirements.txt
 ```
@@ -166,9 +185,18 @@ python src/predict.py --test-dir data/test/images \
 ```
 
 Without `--checkpoint`, the checkpoint with the best validation IoU in `--checkpoint-dir` is used.
-Use `--mask-dir` to also save the predicted masks; `--threshold`, `--min-area` and `--simplify-eps`
-control the post-processing. The CSV has one row per image: `ImageID`, followed by a list of polygons
-`[[(x,y),(x,y),...],[...]]` in pixel coordinates.
+Use `--mask-dir` to also save the predicted masks. The post-processing is controlled by `--threshold`,
+`--min-area` and `--simplify-eps`, plus `--seed-threshold` and `--seed-erosion` for the watershed split;
+`--no-split` restores the original behaviour. The CSV has one row per image: `ImageID`, followed by a
+list of polygons `[[(x,y),(x,y),...],[...]]` in pixel coordinates.
+
+### Evaluation
+```bash
+python src/evaluate.py --images raw/val/image --annotations raw/val/val.json                        --checkpoint models/unet_resnet34_buildings.pth
+```
+
+Runs the full pipeline on the validation set and reports the per-building precision, recall and F1. It
+accepts the same post-processing options as `predict.py`, so it can be used to tune them.
 
 ### Running on Google Colab with Google Drive
 ```python
@@ -185,13 +213,15 @@ Keeping the checkpoints on Drive lets training continue in a new session after a
 
 ## Limitations and next steps
 
-- **Separate touching buildings.** This is the most important improvement for the leaderboard metric.
-  Options: a third "building boundary" class, watershed on the distance transform of the mask, or an
-  instance-segmentation model (Mask R-CNN / YOLO-seg). The winning solution of the challenge used YOLOv8-seg.
-- **Tune the post-processing** (`--threshold`, `--min-area`, `--simplify-eps`) against the competition
-  metric instead of pixel IoU.
+- **Learn the boundaries instead of post-processing them.** The watershed relies on the model being less
+  confident between buildings, so it still fails where buildings share a wall. Options: a third
+  "building boundary" class in the U-Net, or an instance-segmentation model (Mask R-CNN / YOLO-seg) as
+  in the winning solution.
+- **Close the domain gap** (validation 0.65 vs. test 0.40): stronger colour and scale augmentation, or
+  additional training data from other regions.
 - **Longer training and test-time augmentation** (flips) for more accurate masks.
-- **More diverse training data**, for example satellite imagery, to generalize beyond aerial photos.
+- **Regularize the polygons** (right angles, dominant orientation) so that they look like building
+  outlines.
 
 ## Acknowledgements
 
