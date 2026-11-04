@@ -13,8 +13,7 @@ data/*
 # Model weights: download from the GitHub release (see README)
 models/*.pth
 
-# Generated outputs (the submitted CSV and the examples are kept)
+# Generated outputs (the submitted CSV is kept)
 output/*
 !output/submission.csv
-!output/examples/
 test_predictions_masks/
