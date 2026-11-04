@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Data (download it from the competition page, see README)
+raw/
+data/*
+!data/instructions.md
+
+# Model weights: download from the GitHub release (see README)
+models/*.pth
+
+# Generated outputs (the submitted CSV and the examples are kept)
+output/*
+!output/submission.csv
+!output/examples/
+test_predictions_masks/

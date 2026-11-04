@@ -1,4 +1,17 @@
-#prepare_dataset.py
+"""
+Convert the raw competition data (COCO polygons) into image / binary-mask pairs.
+
+    python src/prepare_dataset.py --raw-dir raw --out-dir data
+
+Expected raw layout:
+    raw/train/train.json   raw/train/image/*.jpg
+    raw/val/val.json       raw/val/image/*.jpg
+    raw/test/*.tif         (or raw/test/image/*.tif)
+
+Output: <out-dir>/{train,val}/{images,masks}, <out-dir>/test/images and a few
+preview overlays in <out-dir>/previews.
+"""
+import argparse
 import os
 import json
 import shutil
@@ -103,7 +116,7 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
     preview_count = 0
     for img in images_list:
         base_fn = os.path.basename(img["file_name"])
-        mask_name = base_fn.replace(".jpg", ".png")
+        mask_name = os.path.splitext(base_fn)[0] + ".png"
         mask_path = os.path.join(dst_mask_dir, mask_name)
         masks[img["id"]].save(mask_path)
         saved_masks += 1
@@ -120,7 +133,7 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
                     composed = Image.composite(red, im, mask.convert("L"))
                     # Blend original and overlay for context
                     blended = Image.blend(im, composed, alpha=0.5)
-                    preview_path = os.path.join(preview_dir, base_fn.replace(".jpg", "_preview.png"))
+                    preview_path = os.path.join(preview_dir, os.path.splitext(base_fn)[0] + "_preview.png")
                     blended.save(preview_path)
                     preview_count += 1
                 except Exception as e:
@@ -132,38 +145,42 @@ def coco_to_masks_with_logging(json_path, src_img_dir, dst_img_dir, dst_mask_dir
 
     print("Done.\n")
 
-if __name__ == "__main__":
-    # --- USER CONFIG: set paths for your system ---
-    base_src = r"/content/drive/MyDrive/raw"
-    out_base = r"/content/drive/MyDrive/data"
-
-    # Process training set
-    coco_to_masks_with_logging(
-        json_path=os.path.join(base_src, "train", "train.json"),
-        src_img_dir=os.path.join(base_src, "train", "image"),
-        dst_img_dir=os.path.join(out_base, "train", "images"),
-        dst_mask_dir=os.path.join(out_base, "train", "masks"),
-        preview_dir=os.path.join(out_base, "previews", "train"),
-        max_previews=5
-    )
-
-    # Process validation set
-    coco_to_masks_with_logging(
-        json_path=os.path.join(base_src, "val", "val.json"),
-        src_img_dir=os.path.join(base_src, "val", "image"),
-        dst_img_dir=os.path.join(out_base, "val", "images"),
-        dst_mask_dir=os.path.join(out_base, "val", "masks"),
-        preview_dir=os.path.join(out_base, "previews", "val"),
-        max_previews=5
-    )
-
-    # Copy test images only (no masks)
-    src_test = os.path.join(base_src, "test")
-    dst_test = os.path.join(out_base, "test", "images")
+def copy_test_images(src_test, dst_test):
+    """Copy test images (no masks). Accepts raw/test/*.tif or raw/test/image/*.tif."""
+    if os.path.isdir(os.path.join(src_test, "image")):
+        src_test = os.path.join(src_test, "image")
     os.makedirs(dst_test, exist_ok=True)
-    test_files = 0
+    n = 0
     for f in os.listdir(src_test):
-        if f.lower().endswith((".jpg", ".tif", ".png")):
+        if f.lower().endswith((".jpg", ".tif", ".tiff", ".png")):
             shutil.copy2(os.path.join(src_test, f), os.path.join(dst_test, f))
-            test_files += 1
-    print(f"Copied {test_files} test images to {dst_test}")
+            n += 1
+    print(f"Copied {n} test images to {dst_test}")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--raw-dir", default="raw", help="folder with the original train/val/test data")
+    ap.add_argument("--out-dir", default="data", help="where to write images, masks and previews")
+    ap.add_argument("--previews", type=int, default=5, help="preview overlays per split (0 to disable)")
+    args = ap.parse_args(argv)
+
+    for split in ("train", "val"):
+        coco_to_masks_with_logging(
+            json_path=os.path.join(args.raw_dir, split, f"{split}.json"),
+            src_img_dir=os.path.join(args.raw_dir, split, "image"),
+            dst_img_dir=os.path.join(args.out_dir, split, "images"),
+            dst_mask_dir=os.path.join(args.out_dir, split, "masks"),
+            preview_dir=os.path.join(args.out_dir, "previews", split) if args.previews else None,
+            max_previews=args.previews,
+        )
+
+    src_test = os.path.join(args.raw_dir, "test")
+    if os.path.isdir(src_test):
+        copy_test_images(src_test, os.path.join(args.out_dir, "test", "images"))
+    else:
+        print(f"No test folder at {src_test}; skipping test images.")
+
+
+if __name__ == "__main__":
+    main()
